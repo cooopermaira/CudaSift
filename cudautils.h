@@ -16,7 +16,8 @@ inline void __safeCall(cudaError err, const char *file, const int line)
 {
   if (cudaSuccess != err) {
     fprintf(stderr, "safeCall() Runtime API error in file <%s>, line %i : %s.\n", file, line, cudaGetErrorString(err));
-    exit(-1);
+
+    //exit(-1);
   }
 }
 

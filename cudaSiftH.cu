@@ -69,7 +69,8 @@ void FreeSiftTempMemory(float *memoryTmp)
     safeCall(cudaFree(memoryTmp));
 }
 
-void ExtractSift(SiftData &siftData, CudaImage &img, int numOctaves, double initBlur, float thresh, float lowestScale, bool scaleUp, float *tempMemory) 
+int ExtractSift(SiftData &siftData, CudaImage &img, int numOctaves, double initBlur, float thresh,
+                float lowestScale, bool scaleUp, float *tempMemory)
 {
   TimerGPU timer(0);
   unsigned int *d_PointCounterAddr;
@@ -136,11 +137,16 @@ void ExtractSift(SiftData &siftData, CudaImage &img, int numOctaves, double init
 #ifdef MANAGEDMEM
   safeCall(cudaDeviceSynchronize());
 #else
-  if (siftData.h_data)
-    safeCall(cudaMemcpy(siftData.h_data, siftData.d_data, sizeof(SiftPoint)*siftData.numPts, cudaMemcpyDeviceToHost));
+  if (siftData.h_data) {
+    cudaError_t err = cudaMemcpy(siftData.h_data, siftData.d_data, sizeof(SiftPoint)*siftData.numPts, cudaMemcpyDeviceToHost);
+    if (cudaSuccess != err) {
+      return 1;
+    }
+  }
 #endif
   double totTime = timer.read();
   //printf("Incl prefiltering & memcpy =  %.2f ms %d\n\n", totTime, siftData.numPts);
+  return 0;
 }
 
 int ExtractSiftLoop(SiftData &siftData, CudaImage &img, int numOctaves, double initBlur, float thresh, float lowestScale, float subsampling, float *memoryTmp, float *memorySub) 
