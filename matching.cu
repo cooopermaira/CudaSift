@@ -282,6 +282,7 @@ __global__ void FindMaxCorr4(SiftPoint *sift1, SiftPoint *sift2, int numPts1, in
 __global__ void CleanMatches(SiftPoint *sift1, int numPts1) {
   const int p1 = min(blockIdx.x * 64 + threadIdx.x, numPts1 - 1);
   sift1[p1].score = 0.0f;
+  sift1[p1].match = -1;
 }
 
 #define M7W   32
@@ -289,6 +290,169 @@ __global__ void CleanMatches(SiftPoint *sift1, int numPts1) {
 #define M7R    4
 #define NRX    2
 #define NDIM 128
+
+// __global__ void FindMaxCorr10(SiftPoint *sift1, SiftPoint *sift2,
+//                               int numPts1, int numPts2)
+// {
+//     __shared__ float4 buffer1[M7W * NDIM / 4];
+//     __shared__ float4 buffer2[M7H * NDIM / 4];
+//
+//     int tx = threadIdx.x;
+//     int ty = threadIdx.y;
+//     int bp1 = M7W * blockIdx.x;
+//
+//     // Cooperative load of query tile (M7W descriptors)
+//     for (int j = ty; j < M7W; j += M7H / M7R) {
+//         int p1 = min(bp1 + j, numPts1 - 1);
+//         for (int d = tx; d < NDIM / 4; d += M7W)
+//             buffer1[j * NDIM / 4 + (d + j) % (NDIM / 4)] =
+//                 ((float4 *)&sift1[p1].data)[d];
+//     }
+//
+//     float max_score[NRX], sec_score[NRX];
+//     int index[NRX];
+//     for (int i = 0; i < NRX; ++i) {
+//         max_score[i] = 0.0f;
+//         sec_score[i] = 0.0f;
+//         index[i] = -1;
+//     }
+//
+//     int idx = ty * M7W + tx;
+//     int ix = idx % (M7W / NRX);
+//     int iy = idx / (M7W / NRX);
+//
+//     int numFullTiles = numPts2 / M7H;
+//     int remPts = numPts2 % M7H;
+//
+//     // ----- process all full 32-descriptor tiles -----
+//     for (int bp2 = 0; bp2 < numFullTiles * M7H; bp2 += M7H) {
+//         for (int j = ty; j < M7H; j += M7H / M7R) {
+//             int p2 = bp2 + j;
+//             for (int d = tx; d < NDIM / 4; d += M7W)
+//                 buffer2[j * NDIM / 4 + d] =
+//                     ((float4 *)&sift2[p2].data)[d];
+//         }
+//         __syncthreads();
+//
+//         if (idx < M7W * M7H / M7R / NRX) {
+//             float score[M7R][NRX] = {0};
+//             for (int d = 0; d < NDIM / 4; ++d) {
+//                 float4 v1[NRX];
+//                 for (int i = 0; i < NRX; ++i)
+//                     v1[i] = buffer1[((M7W / NRX) * i + ix) * NDIM / 4 +
+//                                     (d + (M7W / NRX) * i + ix) % (NDIM / 4)];
+//                 for (int dy = 0; dy < M7R; ++dy) {
+//                     float4 v2 = buffer2[(M7R * iy + dy) * (NDIM / 4) + d];
+//                     for (int i = 0; i < NRX; ++i) {
+//                         score[dy][i] += v1[i].x * v2.x +
+//                                         v1[i].y * v2.y +
+//                                         v1[i].z * v2.z +
+//                                         v1[i].w * v2.w;
+//                     }
+//                 }
+//             }
+//             for (int dy = 0; dy < M7R; ++dy) {
+//                 for (int i = 0; i < NRX; ++i) {
+//                     float s = score[dy][i];
+//                     if (s > max_score[i]) {
+//                         sec_score[i] = max_score[i];
+//                         max_score[i] = s;
+//                         index[i] = min(bp2 + M7R * iy + dy, numPts2 - 1);
+//                     } else if (s > sec_score[i])
+//                         sec_score[i] = s;
+//                 }
+//             }
+//         }
+//         __syncthreads();
+//     }
+//
+//     // ----- tail tile (if remPts > 0) -----
+//     if (remPts > 0) {
+//         int bp2 = numFullTiles * M7H;
+//         for (int j = ty; j < remPts; j += M7H / M7R) {
+//             int p2 = bp2 + j;
+//             for (int d = tx; d < NDIM / 4; d += M7W)
+//                 buffer2[j * NDIM / 4 + d] =
+//                     ((float4 *)&sift2[p2].data)[d];
+//         }
+//         __syncthreads();
+//
+//         if (idx < M7W * M7H / M7R / NRX) {
+//             float score[M7R][NRX] = {0};
+//             for (int d = 0; d < NDIM / 4; ++d) {
+//                 float4 v1[NRX];
+//                 for (int i = 0; i < NRX; ++i)
+//                     v1[i] = buffer1[((M7W / NRX) * i + ix) * NDIM / 4 +
+//                                     (d + (M7W / NRX) * i + ix) % (NDIM / 4)];
+//                 for (int dy = 0; dy < M7R; ++dy) {
+//                     int row = M7R * iy + dy;
+//                     if (row < remPts) {
+//                         float4 v2 = buffer2[row * (NDIM / 4) + d];
+//                         for (int i = 0; i < NRX; ++i) {
+//                             score[dy][i] += v1[i].x * v2.x +
+//                                             v1[i].y * v2.y +
+//                                             v1[i].z * v2.z +
+//                                             v1[i].w * v2.w;
+//                         }
+//                     }
+//                 }
+//             }
+//             for (int dy = 0; dy < M7R; ++dy) {
+//                 for (int i = 0; i < NRX; ++i) {
+//                     float s = score[dy][i];
+//                     if (s > max_score[i]) {
+//                         sec_score[i] = max_score[i];
+//                         max_score[i] = s;
+//                         index[i] = min(bp2 + M7R * iy + dy, numPts2 - 1);
+//                     } else if (s > sec_score[i])
+//                         sec_score[i] = s;
+//                 }
+//             }
+//         }
+//         __syncthreads();
+//     }
+//
+//     // rest of the reduction/writeback section (unchanged)
+//     float *scores1 = (float *)buffer1;
+//     float *scores2 = &scores1[M7W * M7H / M7R];
+//     int *indices = (int *)&scores2[M7W * M7H / M7R];
+//
+//     if (idx < M7W * M7H / M7R / NRX) {
+//         for (int i = 0; i < NRX; ++i) {
+//             scores1[iy * M7W + (M7W / NRX) * i + ix] = max_score[i];
+//             scores2[iy * M7W + (M7W / NRX) * i + ix] = sec_score[i];
+//             indices[iy * M7W + (M7W / NRX) * i + ix] = index[i];
+//         }
+//     }
+//     __syncthreads();
+//
+//     int n1_block = max(0, min(M7W, numPts1 - bp1));
+//     if (bp1 >= numPts1) return;
+//
+//     if (ty == 0 && tx < n1_block) {
+//         float max_score_v = scores1[tx];
+//         float sec_score_v = scores2[tx];
+//         int best_idx = indices[tx];
+//         for (int y = 0; y < M7H / M7R; ++y) {
+//             int pos = y * M7W + tx;
+//             if (indices[pos] != best_idx) {
+//                 float s = scores1[pos];
+//                 if (s > max_score_v) {
+//                     sec_score_v = fmaxf(sec_score_v, max_score_v);
+//                     max_score_v = s;
+//                     best_idx = indices[pos];
+//                 } else if (s > sec_score_v)
+//                     sec_score_v = s;
+//             }
+//         }
+//         int safe_idx = (best_idx >= 0 && best_idx < numPts2) ? best_idx : 0;
+//         sift1[bp1 + tx].score = max_score_v;
+//         sift1[bp1 + tx].match = best_idx;
+//         sift1[bp1 + tx].match_xpos = sift2[safe_idx].xpos;
+//         sift1[bp1 + tx].match_ypos = sift2[safe_idx].ypos;
+//         sift1[bp1 + tx].ambiguity = sec_score_v / (max_score_v + 1e-6f);
+//     }
+// }
 
 __global__ void FindMaxCorr10(SiftPoint *sift1, SiftPoint *sift2, int numPts1, int numPts2) {
   __shared__ float4 buffer1[M7W * NDIM / 4];
